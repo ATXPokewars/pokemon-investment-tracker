@@ -234,3 +234,108 @@ def delete_portfolio_item(conn: sqlite3.Connection, portfolio_id: int):
     cursor = conn.cursor()
     cursor.execute("DELETE FROM portfolio WHERE id = ?", (portfolio_id,))
     conn.commit()
+
+
+# --- Graded Card Watchlist ---
+
+def add_to_graded_watchlist(conn: sqlite3.Connection, card_name: str,
+                            set_name: str = None, set_release_date: str = None,
+                            pricecharting_id: str = None,
+                            pricecharting_url: str = None) -> int:
+    """Add a card to the graded watchlist. Returns watchlist id."""
+    cursor = conn.cursor()
+    if pricecharting_id:
+        cursor.execute("SELECT id FROM graded_watchlist WHERE pricecharting_id = ?",
+                        (pricecharting_id,))
+        row = cursor.fetchone()
+        if row:
+            return row["id"]
+    cursor.execute(
+        "INSERT OR IGNORE INTO graded_watchlist "
+        "(card_name, set_name, set_release_date, pricecharting_id, pricecharting_url) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (card_name, set_name, set_release_date, pricecharting_id, pricecharting_url),
+    )
+    conn.commit()
+    if cursor.lastrowid:
+        return cursor.lastrowid
+    cursor.execute("SELECT id FROM graded_watchlist WHERE pricecharting_id = ?",
+                    (pricecharting_id,))
+    return cursor.fetchone()["id"]
+
+
+def remove_from_graded_watchlist(conn: sqlite3.Connection, watchlist_id: int):
+    """Remove a card from the graded watchlist and its price history."""
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM graded_price_history WHERE watchlist_id = ?", (watchlist_id,))
+    cursor.execute("DELETE FROM graded_watchlist WHERE id = ?", (watchlist_id,))
+    conn.commit()
+
+
+def get_graded_watchlist(conn: sqlite3.Connection) -> list[dict]:
+    """Get all cards in the graded watchlist."""
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM graded_watchlist ORDER BY card_name")
+    return [dict(row) for row in cursor.fetchall()]
+
+
+def insert_graded_prices(conn: sqlite3.Connection, watchlist_id: int,
+                          prices: list[dict]):
+    """Bulk insert graded price history. Each dict: grading_company, grade, date, price, source."""
+    cursor = conn.cursor()
+    cursor.executemany(
+        "INSERT OR IGNORE INTO graded_price_history "
+        "(watchlist_id, grading_company, grade, date, price, source) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        [(watchlist_id, p["grading_company"], p["grade"], p["date"],
+          p["price"], p.get("source", "pricecharting")) for p in prices],
+    )
+    conn.commit()
+
+
+def get_graded_price_history(conn: sqlite3.Connection, watchlist_id: int,
+                              grading_company: str = None, grade: str = None,
+                              start_date: str = None, end_date: str = None) -> list[dict]:
+    """Get graded price history, optionally filtered."""
+    query = "SELECT * FROM graded_price_history WHERE watchlist_id = ?"
+    params: list = [watchlist_id]
+    if grading_company:
+        query += " AND grading_company = ?"
+        params.append(grading_company)
+    if grade:
+        query += " AND grade = ?"
+        params.append(grade)
+    if start_date:
+        query += " AND date >= ?"
+        params.append(start_date)
+    if end_date:
+        query += " AND date <= ?"
+        params.append(end_date)
+    query += " ORDER BY date ASC"
+    cursor = conn.cursor()
+    cursor.execute(query, params)
+    return [dict(row) for row in cursor.fetchall()]
+
+
+def get_graded_price_history_multi(conn: sqlite3.Connection, watchlist_ids: list[int],
+                                    grading_company: str = None,
+                                    grade: str = None) -> list[dict]:
+    """Get graded price history for multiple watchlist items."""
+    if not watchlist_ids:
+        return []
+    placeholders = ",".join("?" * len(watchlist_ids))
+    query = f"SELECT gph.*, gw.card_name, gw.set_name, gw.set_release_date " \
+            f"FROM graded_price_history gph " \
+            f"JOIN graded_watchlist gw ON gph.watchlist_id = gw.id " \
+            f"WHERE gph.watchlist_id IN ({placeholders})"
+    params: list = list(watchlist_ids)
+    if grading_company:
+        query += " AND gph.grading_company = ?"
+        params.append(grading_company)
+    if grade:
+        query += " AND gph.grade = ?"
+        params.append(grade)
+    query += " ORDER BY gph.date ASC"
+    cursor = conn.cursor()
+    cursor.execute(query, params)
+    return [dict(row) for row in cursor.fetchall()]

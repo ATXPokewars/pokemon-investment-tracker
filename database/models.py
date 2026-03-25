@@ -92,6 +92,32 @@ def initialize_database():
             UNIQUE(product_id, date)
         );
 
+        -- Graded card watchlist
+        CREATE TABLE IF NOT EXISTS graded_watchlist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            card_name TEXT NOT NULL,
+            set_name TEXT,
+            set_release_date TEXT,
+            pricecharting_id TEXT,
+            pricecharting_url TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(pricecharting_id)
+        );
+
+        -- Graded card price history (from PriceCharting + eBay)
+        CREATE TABLE IF NOT EXISTS graded_price_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            watchlist_id INTEGER NOT NULL,
+            grading_company TEXT NOT NULL,
+            grade TEXT NOT NULL,
+            date TEXT NOT NULL,
+            price REAL NOT NULL,
+            source TEXT DEFAULT 'pricecharting',
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (watchlist_id) REFERENCES graded_watchlist(id),
+            UNIQUE(watchlist_id, grading_company, grade, date, source)
+        );
+
         -- Indexes for performance
         CREATE INDEX IF NOT EXISTS idx_price_points_product_date
             ON price_points(product_id, observed_date);
@@ -101,6 +127,8 @@ def initialize_database():
             ON products(name);
         CREATE INDEX IF NOT EXISTS idx_ebay_listings_product
             ON ebay_listings(product_id, sold_date);
+        CREATE INDEX IF NOT EXISTS idx_graded_history_lookup
+            ON graded_price_history(watchlist_id, grading_company, grade, date);
     """)
 
     conn.commit()
